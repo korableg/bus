@@ -1,0 +1,50 @@
+syntax = "proto3";
+package event;
+option go_package = "github.com/korableg/bus/test";
+
+import "codec/proto/event/event.proto";
+
+message NestedMsg {
+  string name = 1;
+  uint64 duration = 2;
+}
+
+message TestEvent1 {
+  option (korableg.protobuf.event.topic) = "test_topic";
+
+  string id = 1 [ (korableg.protobuf.event.key) = true ];
+  int64 num = 2;
+  NestedMsg nm = 3;
+}
+
+message TestEvent2 {
+  option (korableg.protobuf.event.topic) = "test_topic";
+
+  string solution = 1;
+}
+
+message TestEvent3 {
+  option (korableg.protobuf.event.topic) = "test_topic";
+
+  string id = 1 [ (korableg.protobuf.event.key) = true ];
+  bool result = 2;
+}
+
+message TestEvent4 {
+  option (korableg.protobuf.event.topic) = "test_topic_2";
+
+  int32 id = 1 [ (korableg.protobuf.event.key) = true ];
+  string instance = 2;
+}
+
+message TestEvent5 {
+  option (korableg.protobuf.event.topic) = "test_topic_2";
+
+  int32 id = 1 [ (korableg.protobuf.event.key) = true ];
+  string division = 2;
+  uint64 office = 3;
+}
+
+message NonEvent {
+  string color = 1;
+}

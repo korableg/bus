@@ -1,0 +1,13 @@
+syntax = "proto3";
+package korableg.protobuf.event;
+option go_package = "github.com/korableg/bus/codec/proto/event";
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.MessageOptions {
+  string topic = 1000;
+}
+
+extend google.protobuf.FieldOptions {
+  bool key = 2000;
+}
