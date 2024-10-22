@@ -1,11 +1,13 @@
 package consumer
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
 	"github.com/IBM/sarama"
-	"google.golang.org/protobuf/proto"
+
+	"github.com/korableg/bus/sasl"
 )
 
 const (
@@ -14,17 +16,25 @@ const (
 )
 
 type (
+	TraceIDCtxFunc func(context.Context, string) context.Context
+
 	// Options consumer options
 	Options struct {
-		InitialOffset   int64         // Determine when the group should to start consuming (default "latest")
-		FetchMaxWait    time.Duration // Waiting time before returning messages to the client (relevant if FetchMinBytes > 1) (default 500)
-		FetchMinBytes   int32         // Determine how many bytes kafka library have to receive before returning to the client (latency << FetchMinBytes << throughput) (default 1)
-		CommitCount     int           // After how many messages do client have to call the commit (default 20)
-		CommitDuration  time.Duration // After how much time do client have to call the commit (default 1 second)
-		CommitQueueSize int           // Commit channel size (default 50)
-		Unmarshal       UnmarshalFunc // Message unmarshaller (default proto.Unmarshal)
-		ErrHandler      ErrorHandler  // Handler when an error occurs (on unmarshal or during handling) (default nil)
-		Logger          *slog.Logger  // Logger (default writer is the os.Stdout)
+		InitialOffset int64 // Determine when the group should to start consuming (default: "latest")
+
+		FetchMaxWait  time.Duration // Waiting time before returning messages to the client (relevant if FetchMinBytes > 1) (default 500)
+		FetchMinBytes int32         // Determine how many bytes kafka library have to receive before returning to the client (latency << FetchMinBytes << throughput) (default 1)
+
+		CommitCount    int           // After how many messages do client have to call the commit (default 20)
+		CommitDuration time.Duration // After how much time do client have to call the commit (default 1 second)
+
+		DialTimeout  time.Duration // How long to wait for the initial connection
+		ReadTimeout  time.Duration // How long to wait for a response
+		WriteTimeout time.Duration // How long to wait for a transmit
+
+		Logger     *slog.Logger   // Logger (default: slog.Default)
+		TraceIDCtx TraceIDCtxFunc // Func which inserts trace id into the context
+		SASL       *sasl.SASL     // SASL based authentication with broker
 	}
 
 	// Option consumer option
@@ -32,15 +42,24 @@ type (
 )
 
 // NewOptions constructs Options
-func NewOptions(opts ...Option) Options {
+func newOptions(opts ...Option) Options {
 	o := Options{
-		InitialOffset:   InitialOffsetLatest,
-		FetchMaxWait:    500 * time.Millisecond,
-		FetchMinBytes:   1,
-		CommitCount:     20,
-		CommitDuration:  time.Second,
-		CommitQueueSize: 10,
-		Unmarshal:       proto.Unmarshal,
+		InitialOffset: InitialOffsetLatest,
+
+		FetchMaxWait:  500 * time.Millisecond,
+		FetchMinBytes: 1,
+
+		CommitCount:    20,
+		CommitDuration: time.Second,
+
+		DialTimeout:  5 * time.Second,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 5 * time.Second,
+
+		Logger: slog.Default(),
+		TraceIDCtx: func(ctx context.Context, _ string) context.Context {
+			return ctx
+		},
 	}
 
 	for _, opt := range opts {
@@ -48,22 +67,6 @@ func NewOptions(opts ...Option) Options {
 	}
 
 	return o
-}
-
-// GetLogger logger getter
-func (o *Options) GetLogger() *slog.Logger {
-	if o.Logger == nil {
-		return slog.Default()
-	}
-
-	return o.Logger
-}
-
-// WithErrHandler adds error handler
-func WithErrHandler(f ErrorHandler) Option {
-	return func(o *Options) {
-		o.ErrHandler = f
-	}
 }
 
 // WithEarliestOffsetReset sets AutoOffsetReset to "earliest" mode
@@ -87,13 +90,6 @@ func WithFetchMinBytes(value int32) Option {
 	}
 }
 
-// WithCommitQueueSize sets CommitQueueSize option
-func WithCommitQueueSize(value int) Option {
-	return func(o *Options) {
-		o.CommitQueueSize = value
-	}
-}
-
 // WithCommitCount sets CommitCount option
 func WithCommitCount(value int) Option {
 	return func(o *Options) {
@@ -108,6 +104,27 @@ func WithCommitDuration(value time.Duration) Option {
 	}
 }
 
+// WithDialTimeout sets how long to wait for the initial connection
+func WithDialTimeout(d time.Duration) Option {
+	return func(o *Options) {
+		o.DialTimeout = d
+	}
+}
+
+// WithReadTimeout sets how long to wait for a response
+func WithReadTimeout(d time.Duration) Option {
+	return func(o *Options) {
+		o.ReadTimeout = d
+	}
+}
+
+// WithWriteTimeout sets how long to wait for a transmit
+func WithWriteTimeout(d time.Duration) Option {
+	return func(o *Options) {
+		o.WriteTimeout = d
+	}
+}
+
 // WithLogger sets Logger option
 func WithLogger(logger *slog.Logger) Option {
 	return func(o *Options) {
@@ -115,9 +132,20 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithUnmarshaller sets Unmarshal option
-func WithUnmarshaller(unmarshal UnmarshalFunc) Option {
+// WithTraceIDCtxFunc sets func which inserts trace id to the context
+func WithTraceIDCtxFunc(f TraceIDCtxFunc) Option {
 	return func(o *Options) {
-		o.Unmarshal = unmarshal
+		o.TraceIDCtx = f
+	}
+}
+
+// WithSASL sets SASL based authentication with broker
+func WithSASL(mechanism sasl.Mechanism, username, password string) Option {
+	return func(o *Options) {
+		o.SASL = &sasl.SASL{
+			Mechanism: mechanism,
+			UserName:  username,
+			Password:  password,
+		}
 	}
 }

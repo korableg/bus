@@ -9,7 +9,7 @@ import (
 )
 
 type offsetController struct {
-	handlers *handlerCollection
+	hCtl *handlerController
 
 	commitCount    int64
 	commitDuration time.Duration
@@ -21,16 +21,16 @@ type offsetController struct {
 	logger *slog.Logger
 }
 
-func newOffsetController(handlers *handlerCollection, o Options) *offsetController {
+func newOffsetController(hCtl *handlerController, o Options) *offsetController {
 	return &offsetController{
-		handlers: handlers,
+		hCtl: hCtl,
 
 		commitCount:    int64(o.CommitCount),
 		commitDuration: o.CommitDuration,
 
 		commitSig: make(chan struct{}, 1),
 
-		logger: o.GetLogger(),
+		logger: o.Logger,
 	}
 }
 
@@ -85,16 +85,17 @@ func (o *offsetController) startDurationCommitting(sess sarama.ConsumerGroupSess
 }
 
 func (o *offsetController) getOffset(topic string, partitions ...int32) Offset {
-	var (
-		dstOffset  = make(Offset)
-		srcOffsets = o.handlers.Offsets(topic)
-		srcOff     int64
-		dstOff     int64
-	)
-
+	srcOffsets := o.hCtl.Offsets(topic)
 	if len(srcOffsets) == 0 {
 		return nil
 	}
+
+	var (
+		dstOffset = make(Offset)
+
+		srcOff int64
+		dstOff int64
+	)
 
 	for _, part := range partitions {
 		dstOff = dstOffset[part]

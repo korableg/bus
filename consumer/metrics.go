@@ -17,13 +17,13 @@ const (
 
 var (
 	handlerHistogram = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "protobus_consumer_handler_seconds",
-		Help:    "Histogram of the handling protobus events latency (seconds).",
+		Name:    "kafka_consumer_handler_seconds",
+		Help:    "Histogram of the handling kafka events latency (seconds).",
 		Buckets: prometheus.DefBuckets,
 	}, []string{labelTopic, labelEventType, labelError})
 
 	commitCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "protobus_consumer_committed_total",
+		Name: "kafka_consumer_committed_total",
 		Help: "Total number of committed events.",
 	}, []string{labelTopic, labelPartition})
 )

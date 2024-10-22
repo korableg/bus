@@ -5,63 +5,43 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/IBM/sarama"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/reflect/protoregistry"
-
-	"gitlab.services.mts.ru/scs-data-platform/backend/modules/logger"
-	"gitlab.services.mts.ru/scs-data-platform/backend/modules/protobus"
 )
 
 // Group is the kafka consumer group
 type (
-	UnmarshalFunc func([]byte, proto.Message) error
-	ResolverFunc  func(protoreflect.FullName) (protoreflect.MessageType, error)
-
 	Group struct {
-		cli       sarama.ConsumerGroup
-		hdrs      *handlerCollection
-		offsetCtl *offsetController
+		cli     sarama.ConsumerGroup
+		hCtl    *handlerController
+		session *session
 
-		unmarshal UnmarshalFunc
-		resolve   ResolverFunc
-
-		logger     *slog.Logger
-		errHandler ErrorHandler
-		group      string
+		logger *slog.Logger
 
 		closed chan struct{}
 	}
 )
 
 // NewGroup constructs Group
-func NewGroup(cfg GroupConfig, opts ...Option) (*Group, error) {
-	o := NewOptions(opts...)
+func NewGroup(brokers []string, group string, opts ...Option) (*Group, error) {
+	o := newOptions(opts...)
 
-	cli, err := sarama.NewConsumerGroup(
-		strings.Split(cfg.Brokers, ","),
-		cfg.Group,
-		newSaramaConfig(cfg.Sasl, o))
+	cli, err := sarama.NewConsumerGroup(brokers, group, newSaramaConfig(o))
 	if err != nil {
 		return nil, fmt.Errorf("init consumer group: %w", err)
 	}
 
-	hdrs := newHandlerCollection()
+	var (
+		hCtl = newHandlerCollection()
+		oCtl = newOffsetController(hCtl, o)
+	)
 
 	return &Group{
-		cli:       cli,
-		hdrs:      hdrs,
-		offsetCtl: newOffsetController(hdrs, o),
+		cli:     cli,
+		hCtl:    hCtl,
+		session: newSession(hCtl, oCtl, group, o.Logger, o.TraceIDCtx),
 
-		unmarshal: o.Unmarshal,
-		resolve:   protoregistry.GlobalTypes.FindMessageByName,
-
-		logger:     o.GetLogger(),
-		errHandler: o.ErrHandler,
-		group:      cfg.Group,
+		logger: o.Logger.With("group", group),
 
 		closed: make(chan struct{}),
 	}, nil
@@ -77,17 +57,7 @@ func (c *Group) AddHandler(h Handler) error {
 		return ErrEmptyTopic
 	}
 
-	h.SetErrorHandler(func(msg Message, err error) {
-		if c.errHandler != nil {
-			c.errHandler(msg, fmt.Errorf("%w: %w", ErrMessageHandle, err))
-		}
-		c.logger.Error(fmt.Sprintf("message handler error: %s", err),
-			"name", protobus.GetFullName(msg.Proto),
-			"partition", msg.Partition,
-			"offset", msg.Offset)
-	})
-
-	c.hdrs.Add(h)
+	c.hCtl.Add(h)
 
 	return nil
 }
@@ -98,7 +68,7 @@ func (c *Group) Run(ctx context.Context) (err error) {
 		return ErrClosed
 	}
 
-	topics := c.hdrs.Topics()
+	topics := c.hCtl.Topics()
 	if len(topics) == 0 {
 		return ErrNoTopics
 	}
@@ -112,125 +82,26 @@ func (c *Group) Run(ctx context.Context) (err error) {
 		default:
 		}
 
-		c.logger.Info(fmt.Sprintf("Starting consume by group %s", c.group))
+		c.logger.InfoContext(ctx, "starting of consumption")
 
-		err = c.cli.Consume(ctx, topics, c)
-		if err != nil {
-			if errors.Is(err, sarama.ErrClosedConsumerGroup) {
-				return err
-			}
-		}
+		err = c.cli.Consume(ctx, topics, c.session)
 
-		c.logger.Info(fmt.Sprintf("Consume by group %s was stopped", c.group), "err", err)
-	}
-}
+		c.logger.InfoContext(ctx, "consumption was finished", "err", err)
 
-// Close closes the kafka consumer
-func (c *Group) Stop(context.Context) error {
-	close(c.closed)
-
-	c.logger.Info(fmt.Sprintf("Stopping consume by group %s", c.group))
-
-	return c.cli.Close()
-}
-
-func (c *Group) Setup(sess sarama.ConsumerGroupSession) error {
-	go c.offsetCtl.StartCommitting(sess)
-
-	for topic, partitions := range sess.Claims() {
-		c.logger.Info(fmt.Sprintf("rebalance group %s: assigned topic: %s, partitions: %v",
-			c.group, topic, partitions))
-	}
-
-	return nil
-}
-
-func (c *Group) Cleanup(sess sarama.ConsumerGroupSession) error {
-	c.offsetCtl.Mark(sess)
-
-	for topic, partitions := range sess.Claims() {
-		c.logger.Info(fmt.Sprintf("rebalance group %s: revoked topic: %s, partitions: %v",
-			c.group, topic, partitions))
-	}
-
-	return nil
-}
-
-func (c *Group) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	var handler = c.handlerFunc(sess.Context(), claim.Topic())
-
-	for {
-		select {
-		case kafkaMsg, ok := <-claim.Messages():
-			if !ok {
-				return nil
-			}
-
-			handler(kafkaMsg)
-
-			c.offsetCtl.Inc()
-		case <-sess.Context().Done():
+		if err != nil && errors.Is(err, sarama.ErrClosedConsumerGroup) {
 			return nil
 		}
 	}
 }
 
-func (c *Group) handlerFunc(ctx context.Context, topic string) func(*sarama.ConsumerMessage) {
-	var (
-		handlers = c.hdrs.Handlers(topic)
-		msg      Message
-	)
-
-	return func(kafkaMsg *sarama.ConsumerMessage) {
-		msg = Message{
-			Group:     c.group,
-			Key:       kafkaMsg.Key,
-			Value:     kafkaMsg.Value,
-			Topic:     kafkaMsg.Topic,
-			Partition: kafkaMsg.Partition,
-			Offset:    kafkaMsg.Offset,
-			Timestamp: kafkaMsg.Timestamp,
-		}
-
-		for _, h := range kafkaMsg.Headers {
-			switch string(h.Key) {
-			case protobus.HeaderTraceID:
-				msg.TraceID = string(h.Value)
-			case protobus.HeaderMessageID:
-				msg.ID = string(h.Value)
-			case protobus.HeaderMessageFullName:
-				msg.FullName = protoreflect.FullName(h.Value)
-			}
-		}
-
-		if msg.FullName != "" {
-			mt, err := c.resolve(msg.FullName)
-			if err != nil {
-				if !errors.Is(err, protoregistry.NotFound) {
-					c.logger.Error("resolve message", "err", err)
-				}
-				return
-			}
-
-			msg.Proto = mt.New().Interface()
-
-			err = c.unmarshal(msg.Value, msg.Proto)
-			if err != nil {
-				msg.Proto = nil
-
-				if c.errHandler != nil {
-					c.errHandler(msg, fmt.Errorf("%w: %w", ErrMessageUnmarshal, err))
-				}
-
-				c.logger.Debug("unmarshal message", "err", err)
-			}
-		}
-
-		hCtx := logger.Init(ctx, msg.TraceID)
-		for _, h := range handlers {
-			h.Handle(hCtx, msg)
-		}
+// Close closes the kafka consumer
+func (c *Group) Close() error {
+	if c.isClosed() {
+		return ErrClosed
 	}
+
+	close(c.closed)
+	return c.cli.Close()
 }
 
 func (c *Group) isClosed() bool {

@@ -2,11 +2,9 @@ package producer
 
 import (
 	"github.com/IBM/sarama"
-
-	"github.com/korableg/bus/sasl"
 )
 
-func newSaramaConfig(sasl *sasl.SASL, o Options) *sarama.Config {
+func newSaramaConfig(o Options) *sarama.Config {
 	cfg := sarama.NewConfig()
 
 	cfg.Version = sarama.V3_0_0_0
@@ -30,11 +28,11 @@ func newSaramaConfig(sasl *sasl.SASL, o Options) *sarama.Config {
 	cfg.Producer.Retry.Max = o.Retries
 	cfg.Producer.Retry.Backoff = o.RetryBackOff
 
-	if sasl != nil {
+	if o.SASL != nil {
 		cfg.Net.SASL.Enable = true
-		cfg.Net.SASL.Mechanism = sasl.Mechanism
-		cfg.Net.SASL.User = sasl.UserName
-		cfg.Net.SASL.Password = sasl.Password
+		cfg.Net.SASL.Mechanism = o.SASL.Mechanism
+		cfg.Net.SASL.User = o.SASL.UserName
+		cfg.Net.SASL.Password = o.SASL.Password
 	}
 
 	return cfg

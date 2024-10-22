@@ -1,8 +1,9 @@
 PACKAGE=$(shell go list -m)
+GO_FILES=$(shell find . -name '*.go' | grep -vE 'vendor|easyjson|mock|_gen.go|.pb.go')
 
 .PHONY: lint
 lint:
-	@golangci-lint run --config=./golangci.yml
+	@golangci-lint run --config=./.golangci.yml ./...
 
 .PHONY: imports
 imports:

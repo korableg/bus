@@ -14,7 +14,7 @@ services:
       - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
       - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
     networks:
-      - protobus_dev_net
+      - dev_net
     healthcheck:
       test: kafka-topics.sh --list --bootstrap-server localhost:9092 || exit 1
       interval: 3s
@@ -35,7 +35,7 @@ services:
   #     KAFKA_CLUSTERS_0_METRICS_PORT: 9998
   #     DYNAMIC_CONFIG_ENABLED: 'true'
   #   networks:
-  #     - protobus_dev_net
+  #     - dev_net
   
   kafka_topics:
     container_name: kafka_topics
@@ -44,11 +44,11 @@ services:
       kafka:
         condition: service_healthy
     networks:
-      - protobus_dev_net
+      - dev_net
     command: bash -c "
       kafka-topics.sh --create --topic test_topic --partitions 3 --replication-factor 1 --bootstrap-server kafka:9092 \
       && kafka-topics.sh --create --topic test_topic_2 --bootstrap-server kafka:9092"
 
 networks:
-  protobus_dev_net:
+  dev_net:
     driver: bridge

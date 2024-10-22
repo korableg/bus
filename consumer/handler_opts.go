@@ -1,11 +1,8 @@
 package consumer
 
 import (
-	"encoding/json"
 	"log/slog"
 	"time"
-
-	"google.golang.org/protobuf/proto"
 )
 
 type (
@@ -21,8 +18,6 @@ type (
 		RetryInitialInterval time.Duration
 		RetryMaxInterval     time.Duration
 		RetryMaxTime         time.Duration
-
-		Unmarshal UnmarshalFunc
 	}
 
 	// HandlerOption handler option
@@ -104,21 +99,5 @@ func WithHandlerRetryMaxTime(d time.Duration) HandlerOption {
 func WithHandlerLogger(l *slog.Logger) HandlerOption {
 	return func(o *HandlerOptions) {
 		o.Logger = l
-	}
-}
-
-// WithHandlerUnmarshal sets unmarshal func
-func WithHandlerUnmarshal(unmarshal UnmarshalFunc) HandlerOption {
-	return func(o *HandlerOptions) {
-		o.Unmarshal = unmarshal
-	}
-}
-
-// WithHandlerJSONUnmarshal sets unmarshal func
-func WithHandlerJSONUnmarshal() HandlerOption {
-	return func(o *HandlerOptions) {
-		o.Unmarshal = func(b []byte, m proto.Message) error {
-			return json.Unmarshal(b, m)
-		}
 	}
 }

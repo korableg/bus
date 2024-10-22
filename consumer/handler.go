@@ -2,237 +2,170 @@ package consumer
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
+	"errors"
 	"maps"
 	"slices"
 	"sync"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
-	"gitlab.services.mts.ru/scs-data-platform/backend/modules/protobus"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
+	"github.com/korableg/bus/codec"
 )
 
 type (
-	// Message raw kafka message
-	Message struct {
-		Key       []byte
-		Value     []byte
-		ID        string
-		Group     string
-		Topic     string
-		TraceID   string
-		Partition int32
-		Offset    int64
-		Timestamp time.Time
-		FullName  protoreflect.FullName
-		Proto     proto.Message
+	HandlerProtoFunc[T any] func(ctx context.Context, msg T, raw Message) error
+
+	// HandlerProto handler messages one at a time
+	HandlerProto[T any] struct {
+		handler[T]
+
+		f HandlerProtoFunc[T]
 	}
 
-	// Offset kafka offset by partition
-	Offset map[int32]int64
+	HandlerBatchFunc[T any] func(ctx context.Context, msg []T, raw []Message) error
 
-	// ErrorHandler handler when an error occurs (on unmarshal or during handling)
-	ErrorHandler func(Message, error)
+	// HandlerBatch handler batch of messages
+	HandlerBatch[T any] struct {
+		handler[T]
 
-	// Handler message handler interface
-	Handler interface {
-		Type() protoreflect.MessageType
-		Topic() string
-		Handle(context.Context, Message)
-		Offset(diff bool) Offset
-		SetErrorHandler(ErrorHandler)
-	}
+		batchSize         int
+		batchFlushTimeout time.Duration
 
-	HandlerRegistrar interface {
-		AddHandler(Handler) error
-	}
+		buf       []T
+		bufRaw    []Message
+		bufOffset Offset
+		bufMu     sync.Mutex
 
-	handler[T proto.Message] struct {
-		logger *slog.Logger
+		ticker *time.Ticker
 
-		topic       string
-		msgType     protoreflect.MessageType
-		msgFullName protoreflect.FullName
-
-		unmarshal UnmarshalFunc
-
-		offsetUpdated bool
-		offset        Offset
-		offsetMu      sync.Mutex
-
-		errHandler     ErrorHandler
-		timeoutHandler time.Duration
-
-		retry                bool
-		retryInitialInterval time.Duration
-		retryMaxInterval     time.Duration
-		retryMaxTime         time.Duration
+		f HandlerBatchFunc[T]
 	}
 )
 
-func newHandler[T proto.Message](o HandlerOptions) handler[T] {
-	var zero T
-	return handler[T]{
-		logger: o.Logger,
+// NewHandler constructs HandlerProto
+func NewHandler[T any](decoder codec.Decoder[T], handlerFunc HandlerProtoFunc[T], opts ...HandlerOption) *HandlerProto[T] {
+	o := newHandlerOptions(opts...)
 
-		topic:       protobus.GetTopic(zero),
-		msgType:     zero.ProtoReflect().Type(),
-		msgFullName: protobus.GetFullName(zero),
-
-		offset: make(Offset),
-
-		timeoutHandler: o.Timeout,
-
-		retry:                o.Retry,
-		retryInitialInterval: o.RetryInitialInterval,
-		retryMaxInterval:     o.RetryMaxInterval,
-		retryMaxTime:         o.RetryMaxTime,
-
-		unmarshal: o.Unmarshal,
+	return &HandlerProto[T]{
+		handler: newHandler[T](decoder, o),
+		f:       handlerFunc,
 	}
 }
 
-// ProtoReflect protoreflect.Message getter
-func (p *handler[T]) Type() protoreflect.MessageType {
-	return p.msgType
-}
+// Handle received Message handler
+func (p *HandlerProto[T]) Handle(ctx context.Context, raw Message) {
+	defer p.updateOffset(Offset{raw.Partition: raw.Offset})
 
-// Topic getter
-func (p *handler[T]) Topic() string {
-	return p.topic
-}
-
-// Offset gets a handler's offset
-func (h *handler[T]) Offset(diff bool) Offset {
-	h.offsetMu.Lock()
-	defer h.offsetMu.Unlock()
-
-	if diff && !h.offsetUpdated {
-		return nil
-	}
-
-	h.offsetUpdated = false
-
-	return maps.Clone(h.offset)
-}
-
-func (h *handler[T]) SetErrorHandler(errHandler ErrorHandler) {
-	h.errHandler = errHandler
-}
-
-func (h *handler[T]) updateOffset(offset Offset) {
-	h.offsetMu.Lock()
-	defer h.offsetMu.Unlock()
-
-	for part, off := range offset {
-		var curOffset = h.offset[part]
-		if curOffset < off {
-			h.offset[part] = off
-			h.offsetUpdated = true
+	msg, err := p.decoder.Unmarshal(raw.Value, raw.Headers)
+	if err != nil {
+		if errors.Is(err, codec.ErrWrongType) {
+			return
 		}
-	}
-}
-
-func (h *handler[T]) handle(ctx context.Context, f func(ctx context.Context) error) (err error) {
-	if !h.retry {
-		return h.handleCtx(ctx, f)
+		p.logger.ErrorContext(ctx, "unmarshal message", "err", err)
 	}
 
-	return backoff.RetryNotify(func() error {
-		return h.handleCtx(ctx, f)
-	}, backoff.NewExponentialBackOff(
-		backoff.WithInitialInterval(h.retryInitialInterval),
-		backoff.WithMaxInterval(h.retryMaxInterval),
-		backoff.WithMaxElapsedTime(h.retryMaxTime),
-	), func(err error, d time.Duration) {
-		h.logger.ErrorContext(ctx, "scheduled retry on the consumer handler",
-			"interval", d,
-			"err", err,
-			"topic", h.topic)
+	err = p.handle(ctx, func(fCtx context.Context) error {
+		return p.f(fCtx, msg, raw)
 	})
+
+	if err != nil {
+		p.logger.ErrorContext(ctx, "handle message",
+			"err", err, "topic", raw.Topic, "partition", raw.Partition, "offset", raw.Offset)
+	}
 }
 
-func (h *handler[T]) handleCtx(ctx context.Context, f func(ctx context.Context) error) (err error) {
+// NewHandlerBatch constructs HandlerBatch
+func NewHandlerBatch[T any](decoder codec.Decoder[T], handlerFunc HandlerBatchFunc[T], opts ...HandlerOption) *HandlerBatch[T] {
+	o := newHandlerOptions(opts...)
+
+	var t *time.Ticker
+	if o.BatchFlushTimeout > 0 {
+		t = time.NewTicker(o.BatchFlushTimeout)
+	}
+
+	h := &HandlerBatch[T]{
+		handler: newHandler[T](decoder, o),
+
+		batchSize:         o.BatchSize,
+		batchFlushTimeout: o.BatchFlushTimeout,
+
+		buf:       make([]T, 0, o.BatchSize),
+		bufRaw:    make([]Message, 0, o.BatchSize),
+		bufOffset: make(Offset),
+		ticker:    t,
+		f:         handlerFunc,
+	}
+
+	h.startTimeoutTicker()
+
+	return h
+}
+
+// Handle received Message handler
+func (p *HandlerBatch[T]) Handle(ctx context.Context, raw Message) {
+	msg, err := p.decoder.Unmarshal(raw.Value, raw.Headers)
+	if err != nil {
+		return
+	}
+
+	p.bufMu.Lock()
+	defer p.bufMu.Unlock()
+
+	p.buf = append(p.buf, msg)
+	p.bufRaw = append(p.bufRaw, raw)
+	p.bufOffset[raw.Partition] = raw.Offset
+
+	if p.ticker != nil {
+		p.ticker.Reset(p.batchFlushTimeout)
+	}
+
+	if len(p.buf) < p.batchSize {
+		return
+	}
+
+	p.flush(ctx)
+}
+
+func (p *HandlerBatch[T]) flush(ctx context.Context) {
+	if len(p.buf) == 0 {
+		return
+	}
+
+	var (
+		hBuf    = slices.Clone(p.buf)
+		hbufRaw = slices.Clone(p.bufRaw)
+	)
+
 	defer func() {
-		if p := recover(); p != nil {
-			err = fmt.Errorf("panic: %v", p)
-		}
+		p.buf = p.buf[:0]
+		p.bufRaw = p.bufRaw[:0]
+		clear(p.bufOffset)
 	}()
 
-	var cancel context.CancelFunc
-	if h.timeoutHandler > 0 {
-		ctx, cancel = context.WithTimeout(ctx, h.timeoutHandler)
-		defer cancel()
+	err := p.handle(ctx, func(fCtx context.Context) error {
+		return p.f(ctx, hBuf, hbufRaw)
+	})
+	if err != nil {
+		p.logger.ErrorContext(ctx, "handle message", "err", err)
 	}
 
-	return observeHandler(h.topic, string(h.msgFullName))(f(ctx))
+	p.updateOffset(maps.Clone(p.bufOffset))
 }
 
-func (h *handler[T]) resolveMsg(src proto.Message, raw []byte) (T, bool) {
-	if h.unmarshal == nil {
-		msg, ok := src.(T)
-		return msg, ok
+func (p *HandlerBatch[T]) flushMu() {
+	p.bufMu.Lock()
+	defer p.bufMu.Unlock()
+
+	p.flush(context.Background())
+}
+
+func (p *HandlerBatch[T]) startTimeoutTicker() {
+	if p.ticker == nil {
+		return
 	}
 
-	var msg = h.msgType.New().Interface()
-	return msg.(T), h.unmarshal(raw, msg) == nil
-}
-
-type handlerCollection struct {
-	h  map[string][]Handler
-	mu sync.RWMutex
-}
-
-func newHandlerCollection() *handlerCollection {
-	return &handlerCollection{
-		h: make(map[string][]Handler),
-	}
-}
-
-func (hc *handlerCollection) Add(h Handler) {
-	hc.mu.Lock()
-	hc.h[h.Topic()] = append(hc.h[h.Topic()], h)
-	hc.mu.Unlock()
-}
-
-func (hc *handlerCollection) Topics() []string {
-	hc.mu.RLock()
-	defer hc.mu.RUnlock()
-
-	topics := make([]string, 0, len(hc.h))
-	for t := range hc.h {
-		topics = append(topics, t)
-	}
-
-	return topics
-}
-
-func (hc *handlerCollection) Handlers(topic string) []Handler {
-	hc.mu.RLock()
-	defer hc.mu.RUnlock()
-
-	src := hc.h[topic]
-	if len(src) == 0 {
-		return nil
-	}
-
-	return slices.Clone(src)
-}
-
-func (hc *handlerCollection) Offsets(topic string) []Offset {
-	hc.mu.RLock()
-	defer hc.mu.RUnlock()
-
-	offsets := make([]Offset, 0, len(hc.h[topic]))
-	for _, h := range hc.h[topic] {
-		off := h.Offset(true)
-		if off != nil {
-			offsets = append(offsets, off)
+	go func() {
+		for range p.ticker.C {
+			p.flushMu()
 		}
-	}
-
-	return offsets
+	}()
 }

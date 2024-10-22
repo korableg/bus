@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/korableg/bus/sasl"
 )
 
 type (
@@ -25,6 +27,8 @@ type (
 
 		Logger  *slog.Logger                 // Logger (default writer is the os.Stdout)
 		TraceID func(context.Context) string // Your func to get the trace ID from context
+
+		SASL *sasl.SASL // SASL based authentication with broker
 	}
 
 	// Option producer option
@@ -32,7 +36,7 @@ type (
 )
 
 // NewOptions constructs Options
-func NewOptions(opts ...Option) Options {
+func newOptions(opts ...Option) Options {
 	o := Options{
 		Idempotence:     true,
 		MaxOpenRequests: 1,
@@ -96,20 +100,6 @@ func WithRetryBackOff(d time.Duration) Option {
 	}
 }
 
-// WithLogger sets Logger option
-func WithLogger(logger *slog.Logger) Option {
-	return func(o *Options) {
-		o.Logger = logger
-	}
-}
-
-// WithTraceID sets your trace ID getter from context
-func WithTraceID(traceID func(context.Context) string) Option {
-	return func(o *Options) {
-		o.TraceID = traceID
-	}
-}
-
 // WithDialTimeout sets how long to wait for the initial connection
 func WithDialTimeout(d time.Duration) Option {
 	return func(o *Options) {
@@ -128,5 +118,30 @@ func WithReadTimeout(d time.Duration) Option {
 func WithWriteTimeout(d time.Duration) Option {
 	return func(o *Options) {
 		o.WriteTimeout = d
+	}
+}
+
+// WithLogger sets Logger option
+func WithLogger(logger *slog.Logger) Option {
+	return func(o *Options) {
+		o.Logger = logger
+	}
+}
+
+// WithTraceID sets your trace ID getter from context
+func WithTraceID(traceID func(context.Context) string) Option {
+	return func(o *Options) {
+		o.TraceID = traceID
+	}
+}
+
+// WithSASL sets SASL based authentication with broker
+func WithSASL(mechanism sasl.Mechanism, username, password string) Option {
+	return func(o *Options) {
+		o.SASL = &sasl.SASL{
+			Mechanism: mechanism,
+			UserName:  username,
+			Password:  password,
+		}
 	}
 }

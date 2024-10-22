@@ -1,8 +1,13 @@
 package codec
 
+const (
+	HeaderMessageID = "id"
+	HeaderTraceID   = "trace-id"
+)
+
 var (
-	HeaderMessageID = []byte("id")
-	HeaderTraceID   = []byte("trace-id")
+	HeaderMessageIDByte = []byte(HeaderMessageID)
+	HeaderTraceIDByte   = []byte(HeaderTraceID)
 )
 
 type (
@@ -13,13 +18,18 @@ type (
 
 	Meta interface {
 		Topic() string
-		Key() []byte
-		Headers() []Header
 		Type() string
 	}
 
 	Encoder[T any] interface {
 		Meta
 		Marshal() ([]byte, error)
+		Key() []byte
+		Headers() []Header
+	}
+
+	Decoder[T any] interface {
+		Meta
+		Unmarshal(data []byte, headers []Header) (T, error)
 	}
 )

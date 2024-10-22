@@ -3,9 +3,10 @@ package wire
 import (
 	"sync"
 
-	"github.com/korableg/bus/codec/proto/event"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/korableg/bus/codec/proto/event"
 )
 
 var (
@@ -31,7 +32,6 @@ func keyField(msg proto.Message) protoreflect.FieldDescriptor {
 	keyDescrMu.Unlock()
 
 	return field
-
 }
 
 func keyFieldLong(msg proto.Message) protoreflect.FieldDescriptor {

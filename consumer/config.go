@@ -1,55 +1,17 @@
 package consumer
 
 import (
-	"time"
-
 	"github.com/IBM/sarama"
-	"gitlab.services.mts.ru/scs-data-platform/backend/modules/protobus"
 )
 
-type (
-	Sasl struct {
-		Mechanism string `env:"mechanism"`
-		UserName  string `env:"username"`
-		Password  string `env:"password"`
-	}
-
-	GroupConfig struct {
-		Brokers string `env:"brokers"`
-		Group   string `env:"group"`
-		Sasl    Sasl   `env:"sasl"`
-	}
-
-	FacadeConfig struct {
-		Brokers string `env:"brokers"`
-		Sasl    Sasl   `env:"sasl"`
-	}
-)
-
-func NewGroupConfig() GroupConfig {
-	return GroupConfig{
-		Sasl: Sasl{
-			Mechanism: protobus.SecuritySaslPlain,
-		},
-	}
-}
-
-func NewFacadeConfig() FacadeConfig {
-	return FacadeConfig{
-		Sasl: Sasl{
-			Mechanism: protobus.SecuritySaslPlain,
-		},
-	}
-}
-
-func newSaramaConfig(sasl Sasl, o Options) *sarama.Config {
+func newSaramaConfig(o Options) *sarama.Config {
 	cfg := sarama.NewConfig()
 	cfg.ChannelBufferSize = 1024
 	cfg.Version = sarama.V3_0_0_0
 
-	cfg.Net.DialTimeout = 5 * time.Second
-	cfg.Net.ReadTimeout = 10 * time.Second
-	cfg.Net.WriteTimeout = 5 * time.Second
+	cfg.Net.DialTimeout = o.DialTimeout
+	cfg.Net.ReadTimeout = o.ReadTimeout
+	cfg.Net.WriteTimeout = o.WriteTimeout
 
 	cfg.Consumer.Offsets.Initial = o.InitialOffset
 	cfg.Consumer.Offsets.AutoCommit.Enable = false
@@ -62,11 +24,11 @@ func newSaramaConfig(sasl Sasl, o Options) *sarama.Config {
 		sarama.NewBalanceStrategyRange(),
 	}
 
-	if sasl.UserName != "" {
+	if o.SASL != nil {
 		cfg.Net.SASL.Enable = true
-		cfg.Net.SASL.Mechanism = sarama.SASLMechanism(sasl.Mechanism)
-		cfg.Net.SASL.User = sasl.UserName
-		cfg.Net.SASL.Password = sasl.Password
+		cfg.Net.SASL.Mechanism = o.SASL.Mechanism
+		cfg.Net.SASL.User = o.SASL.UserName
+		cfg.Net.SASL.Password = o.SASL.Password
 	}
 
 	return cfg

@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/korableg/bus/codec"
-	"github.com/korableg/bus/sasl"
 )
 
 // Producer the kafka producer
@@ -30,10 +29,18 @@ type Producer[T any] struct {
 }
 
 // New constructs Producer
-func New[T any](encoder func(T) codec.Encoder[T], brokers []string, sasl *sasl.SASL, opts ...Option) (*Producer[T], error) {
-	o := NewOptions(opts...)
+func New[T any](encoder func(T) codec.Encoder[T], brokers []string, opts ...Option) (*Producer[T], error) {
+	if encoder == nil {
+		return nil, errors.New("encoder is not defined")
+	}
 
-	cli, err := sarama.NewClient(brokers, newSaramaConfig(sasl, o))
+	if len(brokers) == 0 {
+		return nil, errors.New("brokers are empty")
+	}
+
+	o := newOptions(opts...)
+
+	cli, err := sarama.NewClient(brokers, newSaramaConfig(o))
 	if err != nil {
 		return nil, fmt.Errorf("init sarama client: %w", err)
 	}
@@ -51,11 +58,12 @@ func New[T any](encoder func(T) codec.Encoder[T], brokers []string, sasl *sasl.S
 	pbp := &Producer[T]{
 		asyncProducer: asyncProducer,
 		syncProducer:  syncProducer,
-		encoder:       encoder,
 
+		encoder:      encoder,
 		isIdempotent: o.Idempotence,
-		logger:       o.Logger,
-		traceID:      o.TraceID,
+
+		logger:  o.Logger,
+		traceID: o.TraceID,
 	}
 
 	go pbp.readEvents()
@@ -98,6 +106,18 @@ func (p *Producer[T]) SendSync(ctx context.Context, msg T) error {
 	return nil
 }
 
+// Close closes Producer
+func (p *Producer[T]) Close() error {
+	if p.isClosed.Swap(true) {
+		return ErrClosed
+	}
+
+	return errors.Join(
+		p.asyncProducer.Close(),
+		p.syncProducer.Close(),
+	)
+}
+
 func (p *Producer[T]) producerMessage(ctx context.Context, msg T) (*sarama.ProducerMessage, error) {
 	var (
 		enc = p.encoder(msg)
@@ -132,13 +152,13 @@ func (p *Producer[T]) producerMessage(ctx context.Context, msg T) (*sarama.Produ
 	)
 
 	msgHdrs = append(msgHdrs, sarama.RecordHeader{
-		Key:   codec.HeaderMessageID,
+		Key:   codec.HeaderMessageIDByte,
 		Value: []byte(id.String()),
 	})
 
 	if traceID := p.traceID(ctx); traceID != "" {
 		msgHdrs = append(msgHdrs, sarama.RecordHeader{
-			Key:   codec.HeaderTraceID,
+			Key:   codec.HeaderTraceIDByte,
 			Value: []byte(traceID),
 		})
 	}
@@ -165,11 +185,17 @@ func (p *Producer[T]) producerMessage(ctx context.Context, msg T) (*sarama.Produ
 }
 
 func (p *Producer[T]) readEvents() {
-	var m metric
+	var (
+		m  metric
+		ok bool
+
+		success *sarama.ProducerMessage
+		err     *sarama.ProducerError
+	)
 
 	for {
 		select {
-		case success, ok := <-p.asyncProducer.Successes():
+		case success, ok = <-p.asyncProducer.Successes():
 			if !ok {
 				return
 			}
@@ -177,7 +203,7 @@ func (p *Producer[T]) readEvents() {
 			if m, ok = success.Metadata.(metric); ok {
 				observeSend(m, nil)
 			}
-		case err, ok := <-p.asyncProducer.Errors():
+		case err, ok = <-p.asyncProducer.Errors():
 			if !ok {
 				return
 			}
@@ -189,16 +215,4 @@ func (p *Producer[T]) readEvents() {
 			}
 		}
 	}
-}
-
-// Close closes Producer
-func (p *Producer[T]) Close() error {
-	if p.isClosed.Swap(true) {
-		return ErrClosed
-	}
-
-	return errors.Join(
-		p.asyncProducer.Close(),
-		p.syncProducer.Close(),
-	)
 }
