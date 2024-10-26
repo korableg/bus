@@ -1,6 +1,8 @@
 # BUS: The Kafka event bus framework
 
-<img src="./asset/gopher-ride-bus-circled.png" alt="Bus gopher logo" width="600" height="600" style="display: block; margin: 0 auto"/>
+<p align="center">
+<img src="./asset/gopher-ride-bus-circled.png" alt="Bus gopher logo" width="600" height="600"/>
+</p>
 
 This framework gives you a convenient mechanism for using Kafka. You do not need more cycles and care for commits in your code, just connect and use.
 
