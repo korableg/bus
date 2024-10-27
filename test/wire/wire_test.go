@@ -33,7 +33,7 @@ const (
 
 var (
 	traceID   = uuid.NewString()
-	bootstrap = []string{"127.0.0.1:9094"}
+	bootstrap = []string{os.Getenv("KAFKA_BOOTSTRAP_SERVERS")}
 )
 
 func TestIntegration_Producer_Consumer(t *testing.T) {

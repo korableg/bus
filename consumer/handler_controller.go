@@ -11,12 +11,8 @@ func (hc handlerController) Add(h Handler) {
 	hc[h.Topic()] = append(hc[h.Topic()], h)
 }
 
-func (hc handlerController) Topics() (topics []string) {
-	topics = make([]string, 0, len(hc))
-
-	slices.AppendSeq(topics, maps.Keys(hc))
-
-	return topics
+func (hc handlerController) Topics() []string {
+	return slices.AppendSeq(make([]string, 0, len(hc)), maps.Keys(hc))
 }
 
 func (hc handlerController) Handlers(topic string) []Handler {

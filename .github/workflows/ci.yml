@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: './go.mod'
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: v1.61
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: './go.mod'
+      - name: Kafka KRaft
+        uses: spicyparrot/kafka-kraft-action@v1.1.3
+        with:
+          kafka-version: "3.7.0"
+          kafka-topics: "test_topic,3,test_topic_2,3"
+      - name: Test
+        run: make test_github
+        env:
+            KAFKA_BOOTSTRAP_SERVERS: ${{ env.kafka_runner_address }}:9093
+
+    
