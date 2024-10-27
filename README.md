@@ -1,6 +1,8 @@
 # BUS: The Kafka event bus framework
 
 ![coverage](https://raw.githubusercontent.com/korableg/bus/badges/.badges/main/coverage.svg)
+[![Go Report Card](https://goreportcard.com/badge/github.com/korableg/bus)](https://goreportcard.com/report/github.com/korableg/bus)
+[![Go Reference](https://pkg.go.dev/badge/github.com/korableg/bus.svg)](https://pkg.go.dev/github.com/korableg/bus)
 
 <p align="center">
 <img src="./asset/gopher-ride-bus-circled.png" alt="Bus gopher logo" width="600" height="600"/>
