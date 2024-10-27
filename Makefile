@@ -15,8 +15,3 @@ test:
 	&& go clean -testcache \
 	&& KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:9094 go test --tags=integration_test -v -race ./... \
 	; docker compose down
-
-.PHONY: test_github
-test:
-	go clean -testcache \
-	&& go test --tags=integration_test -v -race ./... \

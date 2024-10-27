@@ -32,8 +32,16 @@ jobs:
           kafka-version: "3.7.0"
           kafka-topics: "test_topic,3,test_topic_2,3"
       - name: Test
-        run: make test_github
+        run: go test --tags=integration_test -v -race ./... -coverprofile=./cover.out -covermode=atomic -coverpkg=./...
         env:
             KAFKA_BOOTSTRAP_SERVERS: ${{ env.kafka_runner_address }}:9093
+      - name: check test coverage
+        uses: vladopajic/go-test-coverage@v2
+        with:
+          profile: cover.out
+          local-prefix: github.com/korableg/bus
+          threshold-file: 80
+          threshold-package: 80
+          threshold-total: 95
 
     
