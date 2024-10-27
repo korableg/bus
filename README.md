@@ -1,5 +1,7 @@
 # BUS: The Kafka event bus framework
 
+![coverage](https://raw.githubusercontent.com/korableg/bus/badges/.badges/main/coverage.svg)
+
 <p align="center">
 <img src="./asset/gopher-ride-bus-circled.png" alt="Bus gopher logo" width="600" height="600"/>
 </p>
