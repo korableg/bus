@@ -9,7 +9,7 @@ import (
 )
 
 type offsetController struct {
-	hCtl *handlerController
+	hCtl handlerController
 
 	commitCount    int64
 	commitDuration time.Duration
@@ -21,7 +21,7 @@ type offsetController struct {
 	logger *slog.Logger
 }
 
-func newOffsetController(hCtl *handlerController, o Options) *offsetController {
+func newOffsetController(hCtl handlerController, o Options) *offsetController {
 	return &offsetController{
 		hCtl: hCtl,
 
@@ -42,8 +42,7 @@ func (o *offsetController) Inc() {
 
 func (o *offsetController) Mark(sess sarama.ConsumerGroupSession) (marked bool) {
 	for topic, parts := range sess.Claims() {
-		offset := o.getOffset(topic, parts...)
-		for part, off := range offset {
+		for part, off := range o.hCtl.Offset(topic, parts...) {
 			sess.MarkOffset(topic, part, off+1, "ok")
 			incCommitted(topic, part)
 			o.logger.Debug("mark offset", "topic", topic, "partition", part, "offset", off)
@@ -82,44 +81,6 @@ func (o *offsetController) startDurationCommitting(sess sarama.ConsumerGroupSess
 			return
 		}
 	}
-}
-
-func (o *offsetController) getOffset(topic string, partitions ...int32) Offset {
-	srcOffsets := o.hCtl.Offsets(topic)
-	if len(srcOffsets) == 0 {
-		return nil
-	}
-
-	var (
-		dstOffset = make(Offset)
-
-		srcOff int64
-		dstOff int64
-	)
-
-	for _, part := range partitions {
-		dstOff = dstOffset[part]
-
-		for _, src := range srcOffsets {
-			srcOff = src[part]
-
-			if srcOff == 0 {
-				delete(dstOffset, part)
-				break
-			}
-
-			if dstOff == 0 || dstOff > srcOff {
-				dstOffset[part] = srcOff
-				dstOff = srcOff
-			}
-		}
-	}
-
-	if len(dstOffset) == 0 {
-		return nil
-	}
-
-	return dstOffset
 }
 
 func (o *offsetController) sendSig() {

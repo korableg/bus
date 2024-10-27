@@ -12,7 +12,7 @@ import (
 
 type session struct {
 	oCtl *offsetController
-	hCtl *handlerController
+	hCtl handlerController
 
 	group string
 
@@ -20,7 +20,7 @@ type session struct {
 	traceIDCtx TraceIDCtxFunc
 }
 
-func newSession(hCtl *handlerController, oCtl *offsetController, group string, logger *slog.Logger, traceIDCtx TraceIDCtxFunc) *session {
+func newSession(hCtl handlerController, oCtl *offsetController, group string, logger *slog.Logger, traceIDCtx TraceIDCtxFunc) *session {
 	return &session{
 		oCtl:  oCtl,
 		hCtl:  hCtl,
@@ -69,7 +69,6 @@ func (s *session) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.Co
 
 			s.oCtl.Inc()
 		case <-sess.Context().Done():
-			// s.logger.Info(fmt.Sprintf("Consume by group %s was stopped", s.group), "err", err)
 			return nil
 		}
 	}

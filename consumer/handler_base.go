@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"fmt"
+	"iter"
 	"log/slog"
 	"maps"
 	"sync"
@@ -31,19 +32,21 @@ type (
 	// Offset kafka offset by partition
 	Offset map[int32]int64
 
+	// Offset sequence
+	OffsetSeq = iter.Seq2[int32, int64]
+
 	// Handler message handler interface
 	Handler interface {
 		codec.Meta
 		Handle(context.Context, Message)
-		Offset(diff bool) Offset
+		Offset(partition int32) int64
 	}
 
 	handler[T any] struct {
 		logger *slog.Logger
 
-		offsetUpdated bool
-		offset        Offset
-		offsetMu      sync.Mutex
+		offset   Offset
+		offsetMu sync.Mutex
 
 		timeoutHandler time.Duration
 
@@ -83,31 +86,21 @@ func (p *handler[T]) Topic() string {
 	return p.decoder.Topic()
 }
 
-// Offset gets a handler's offset
-func (h *handler[T]) Offset(diff bool) Offset {
+// Offset gets a handler's offset sequence
+func (h *handler[T]) Offset(part int32) (off int64) {
 	h.offsetMu.Lock()
-	defer h.offsetMu.Unlock()
+	off = h.offset[part]
+	h.offsetMu.Unlock()
 
-	if diff && !h.offsetUpdated {
-		return nil
-	}
-
-	h.offsetUpdated = false
-
-	return maps.Clone(h.offset)
+	return off
 }
 
 func (h *handler[T]) updateOffset(offset Offset) {
 	h.offsetMu.Lock()
-	defer h.offsetMu.Unlock()
 
-	for part, off := range offset {
-		var curOffset = h.offset[part]
-		if curOffset < off {
-			h.offset[part] = off
-			h.offsetUpdated = true
-		}
-	}
+	maps.Copy(h.offset, offset)
+
+	h.offsetMu.Unlock()
 }
 
 func (h *handler[T]) handle(ctx context.Context, f func(ctx context.Context) error) (err error) {
@@ -144,13 +137,3 @@ func (h *handler[T]) handleCtx(ctx context.Context, f func(ctx context.Context) 
 
 	return observeHandler(h.decoder.Topic(), h.decoder.Type())(f(ctx))
 }
-
-// func (h *handler[T]) resolveMsg(src proto.Message, raw []byte) (T, bool) {
-// 	if h.unmarshal == nil {
-// 		msg, ok := src.(T)
-// 		return msg, ok
-// 	}
-
-// 	var msg = h.msgType.New().Interface()
-// 	return msg.(T), h.unmarshal(raw, msg) == nil
-// }
