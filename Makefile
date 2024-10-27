@@ -13,5 +13,5 @@ imports:
 test:
 	docker compose up --wait -d \
 	&& go clean -testcache \
-	&& KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:9094 go test --tags=integration_test -v -race ./... \
+	&& KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:9094 go test --tags=integration_test -v -race ./... -coverprofile=./cover.out -covermode=atomic -coverpkg=./... \
 	; docker compose down
