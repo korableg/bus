@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	wireCodec "github.com/korableg/bus/codec/proto/wire"
 	"github.com/korableg/bus/consumer"
@@ -33,7 +34,7 @@ const (
 
 var (
 	traceID   = uuid.NewString()
-	bootstrap = []string{"127.0.0.1:9094"}
+	bootstrap = []string{os.Getenv("KAFKA_BOOTSTRAP_SERVERS")}
 )
 
 func TestIntegration_Producer_Consumer(t *testing.T) {
@@ -239,7 +240,15 @@ func TestIntegration_Producer(t *testing.T) {
 
 	ctx := context.Background()
 
-	k, err := producer.New(wireCodec.Encoder(), bootstrap)
+	k, err := producer.New[proto.Message](nil, bootstrap)
+	assert.EqualError(t, err, "encoder is not defined")
+	assert.Nil(t, k)
+
+	k, err = producer.New(wireCodec.Encoder(), nil)
+	assert.EqualError(t, err, "brokers are empty")
+	assert.Nil(t, k)
+
+	k, err = producer.New(wireCodec.Encoder(), bootstrap)
 	require.NoError(t, err)
 
 	err = k.Send(ctx, &test.TestEvent1{
@@ -272,6 +281,13 @@ func TestIntegration_Producer(t *testing.T) {
 	assert.ErrorIs(t, err, producer.ErrClosed)
 
 	err = k.Send(ctx, &test.TestEvent1{
+		Id:  uuid.NewString(),
+		Num: 23423,
+		Nm:  nil,
+	})
+	assert.ErrorIs(t, err, producer.ErrClosed)
+
+	err = k.SendSync(ctx, &test.TestEvent1{
 		Id:  uuid.NewString(),
 		Num: 23423,
 		Nm:  nil,

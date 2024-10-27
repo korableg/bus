@@ -13,6 +13,8 @@ var (
 	ErrEmptyTopic = errors.New("empty topic")
 	// ErrClosed consumer was closed
 	ErrClosed = errors.New("closed")
+	// ErrRunned consumer is runned
+	ErrRunned = errors.New("runned")
 
 	// ErrMessageUnmarshal the error happens when message tried to unmarshal
 	ErrMessageUnmarshal = errors.New("message unmarshal error")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 
 	"github.com/IBM/sarama"
 )
@@ -13,12 +14,13 @@ import (
 type (
 	Group struct {
 		cli     sarama.ConsumerGroup
-		hCtl    *handlerController
+		hCtl    handlerController
 		session *session
 
 		logger *slog.Logger
 
 		closed chan struct{}
+		runned atomic.Bool
 	}
 )
 
@@ -32,7 +34,7 @@ func NewGroup(brokers []string, group string, opts ...Option) (*Group, error) {
 	}
 
 	var (
-		hCtl = newHandlerCollection()
+		hCtl = make(handlerController)
 		oCtl = newOffsetController(hCtl, o)
 	)
 
@@ -53,6 +55,10 @@ func (c *Group) AddHandler(h Handler) error {
 		return ErrClosed
 	}
 
+	if c.isRunned() {
+		return ErrRunned
+	}
+
 	if h.Topic() == "" {
 		return ErrEmptyTopic
 	}
@@ -67,6 +73,8 @@ func (c *Group) Run(ctx context.Context) (err error) {
 	if c.isClosed() {
 		return ErrClosed
 	}
+
+	c.runned.Store(true)
 
 	topics := c.hCtl.Topics()
 	if len(topics) == 0 {
@@ -111,4 +119,8 @@ func (c *Group) isClosed() bool {
 	default:
 		return false
 	}
+}
+
+func (c *Group) isRunned() bool {
+	return c.runned.Load()
 }

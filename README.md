@@ -1,5 +1,7 @@
 # BUS: The Kafka event bus framework
 
+![coverage](https://raw.githubusercontent.com/korableg/bus/badges/.badges/main/coverage.svg)
+
 <p align="center">
 <img src="./asset/gopher-ride-bus-circled.png" alt="Bus gopher logo" width="600" height="600"/>
 </p>
@@ -29,25 +31,25 @@ See examples in the [test](./test/test.proto) package.
 ```go
 p, err := producer.New(wireCodec.Encoder(), brokers)
 if err != nil {
-	return err
+    return err
 }
 
 // Async sending
 err = p.Send(ctx, &events.YourEvent{})
 if err != nil {
-	return err
+    return err
 }
 
 // Sync sending
 err = p.SendSync(ctx, &events.YourEvent{})
 if err != nil {
-	return err
+    return err
 }
 
 // You have to close producer before closing your application to prevent lose of the messages in the buffer
 err = p.Close()
 if err != nil {
-	return err
+    return err
 }
 ```
 

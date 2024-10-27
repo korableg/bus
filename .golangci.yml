@@ -5,16 +5,11 @@ run:
 
 output:
   print-issued-lines: false
-  formats: colored-line-number
+  formats:
+    - format: colored-line-number
 
-  # Must have. Easier to understand the output.
   print-linter-name: true
-
-  # No, no skips, everything should be reported.
   uniq-by-line: true
-
-
-  # Slightly easier to follow the results + getting deterministic output.
   sort-results: true
 
 
@@ -30,7 +25,6 @@ linters:
       - errcheck
       - errname
       - errorlint
-      - exportloopref
       - gocritic
       - gofmt
       - gomoddirectives

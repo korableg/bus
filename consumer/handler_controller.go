@@ -1,44 +1,22 @@
 package consumer
 
 import (
+	"maps"
 	"slices"
-	"sync"
 )
 
-type handlerController struct {
-	h  map[string][]Handler
-	mu sync.RWMutex
+type handlerController map[string][]Handler
+
+func (hc handlerController) Add(h Handler) {
+	hc[h.Topic()] = append(hc[h.Topic()], h)
 }
 
-func newHandlerCollection() *handlerController {
-	return &handlerController{
-		h: make(map[string][]Handler),
-	}
+func (hc handlerController) Topics() []string {
+	return slices.AppendSeq(make([]string, 0, len(hc)), maps.Keys(hc))
 }
 
-func (hc *handlerController) Add(h Handler) {
-	hc.mu.Lock()
-	hc.h[h.Topic()] = append(hc.h[h.Topic()], h)
-	hc.mu.Unlock()
-}
-
-func (hc *handlerController) Topics() []string {
-	hc.mu.RLock()
-	defer hc.mu.RUnlock()
-
-	topics := make([]string, 0, len(hc.h))
-	for t := range hc.h {
-		topics = append(topics, t)
-	}
-
-	return topics
-}
-
-func (hc *handlerController) Handlers(topic string) []Handler {
-	hc.mu.RLock()
-	defer hc.mu.RUnlock()
-
-	src := hc.h[topic]
+func (hc handlerController) Handlers(topic string) []Handler {
+	src := hc[topic]
 	if len(src) == 0 {
 		return nil
 	}
@@ -46,17 +24,33 @@ func (hc *handlerController) Handlers(topic string) []Handler {
 	return slices.Clone(src)
 }
 
-func (hc *handlerController) Offsets(topic string) []Offset {
-	hc.mu.RLock()
-	defer hc.mu.RUnlock()
+func (hc handlerController) Offset(topic string, partitions ...int32) OffsetSeq {
+	return func(yield func(int32, int64) bool) {
+		var srcOff, dstOff int64
 
-	offsets := make([]Offset, 0, len(hc.h[topic]))
-	for _, h := range hc.h[topic] {
-		off := h.Offset(true)
-		if off != nil {
-			offsets = append(offsets, off)
+		for _, part := range partitions {
+			dstOff = 0
+
+			for _, h := range hc[topic] {
+				srcOff = h.Offset(part)
+
+				if srcOff <= 0 {
+					dstOff = 0
+					break
+				}
+
+				if dstOff == 0 || dstOff > srcOff {
+					dstOff = srcOff
+				}
+			}
+
+			if dstOff == 0 {
+				continue
+			}
+
+			if !yield(part, dstOff) {
+				break
+			}
 		}
 	}
-
-	return offsets
 }
