@@ -5,7 +5,7 @@ on:
   pull_request:
   workflow_dispatch:
   push:
-    branches: main
+    branches: mainf
 
 jobs:
   lint:
@@ -20,7 +20,7 @@ jobs:
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v3
       with:
-        version: v1.61
+        version: v1.64
   test:
     runs-on: ubuntu-latest
     steps:

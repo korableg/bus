@@ -46,7 +46,6 @@ linters:
       - rowserrcheck
       - sqlclosecheck
       - staticcheck
-      - tenv
       - testableexamples
       - thelper
       - tparallel
