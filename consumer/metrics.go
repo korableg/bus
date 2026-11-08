@@ -6,6 +6,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+
+	"github.com/korableg/bus/internal/metrics"
 )
 
 const (
@@ -22,9 +24,11 @@ var (
 		Buckets: prometheus.DefBuckets,
 	}, []string{labelTopic, labelEventType, labelError})
 
-	commitCounter = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "kafka_consumer_committed_total",
-		Help: "Total number of committed events.",
+	// committedOffset is the committed offset by partition. After a rebalance the previous owner keeps
+	// exporting the last value of the partition, so use max by (topic, partition) in the queries.
+	committedOffset = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "kafka_consumer_committed_offset",
+		Help: "Committed offset (the next offset to consume) by partition.",
 	}, []string{labelTopic, labelPartition})
 )
 
@@ -35,23 +39,16 @@ func observeHandler(topic, eventType string) func(err error) error {
 		handlerHistogram.With(prometheus.Labels{
 			labelTopic:     topic,
 			labelEventType: eventType,
-			labelError:     errToLabel(err),
+			labelError:     metrics.ErrToLabel(err),
 		}).Observe(time.Since(start).Seconds())
 
 		return err
 	}
 }
 
-func incCommitted(topic string, partition int32) {
-	commitCounter.With(prometheus.Labels{
+func setCommitted(topic string, partition int32, offset int64) {
+	committedOffset.With(prometheus.Labels{
 		labelTopic:     topic,
 		labelPartition: strconv.Itoa(int(partition)),
-	}).Inc()
-}
-
-func errToLabel(err error) string {
-	if err == nil {
-		return "false"
-	}
-	return "true"
+	}).Set(float64(offset))
 }

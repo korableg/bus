@@ -1,132 +1,127 @@
+version: "2"
+
 run:
   timeout: 5m
   concurrency: 8
   issues-exit-code: 1
 
 output:
-  print-issued-lines: false
   formats:
-    - format: colored-line-number
-
-  print-linter-name: true
-  uniq-by-line: true
-  sort-results: true
-
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: false
 
 linters:
-  disable-all: true
+  default: none
   enable:
-      - asasalint
-      - asciicheck
-      - bidichk
-      - bodyclose
-      - contextcheck
-      - durationcheck
-      - errcheck
-      - errname
-      - errorlint
-      - gocritic
-      - gofmt
-      - gomoddirectives
-      - gosec
-      - gosimple
-      - govet
-      - ineffassign
-      - misspell
-      - nakedret
-      - nilerr
-      - nilnil
-      - noctx
-      - nolintlint
-      - prealloc
-      - predeclared
-      - promlinter
-      - reassign
-      - revive
-      - rowserrcheck
-      - sqlclosecheck
-      - staticcheck
-      - testableexamples
-      - thelper
-      - tparallel
-      - unconvert
-      - unparam
-      - unused
-      - usestdlibvars
-      - wastedassign
-      - funlen
-      - goconst
-      - dupl
-      - typecheck
-      - nilerr
-      - nilnil
-      - predeclared
-      - whitespace
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - contextcheck
+    - dupl
+    - durationcheck
+    - errcheck
+    - errname
+    - errorlint
+    - funlen
+    - goconst
+    - gocritic
+    - gomoddirectives
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - nilerr
+    - nilnil
+    - noctx
+    - nolintlint
+    - prealloc
+    - predeclared
+    - promlinter
+    - reassign
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - testableexamples
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - wastedassign
+    - whitespace
 
-linters-settings:
-  errcheck:
-    check-type-assertions: true
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      exclude-functions:
+        - io/ioutil.ReadFile
+        - io.Copy(*bytes.Buffer)
+        - io.Copy(os.Stdout)
 
-    check-blank: true
+    funlen:
+      lines: 120
+      statements: 60
+      ignore-comments: true
 
-    exclude-functions:
-      - io/ioutil.ReadFile
-      - io.Copy(*bytes.Buffer)
-      - io.Copy(os.Stdout)
+    gocritic:
+      settings:
+        captLocal:
+          paramsOnly: false
+        underef:
+          skipRecvDeref: false
 
-  funlen:
-    lines: 120
-    # Checks the number of statements in a function.
-    # If lower than 0, disable the check.
-    # Default: 40
-    statements: 60
-    # Ignore comments when counting lines.
-    # Default false
-    ignore-comments: true
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # too strict
+      settings:
+        shadow:
+          strict: true
 
+    nakedret:
+      # No naked returns, ever.
+      max-func-lines: 1
 
-  gocritic:
-    settings:
-      captLocal:
-        paramsOnly: false
-      underef:
-        skipRecvDeref: false
+    revive:
+      rules:
+        # Blank import should be only in a main or test package, or have a comment justifying it.
+        - name: blank-imports
+          disabled: true
+        # Since Go 1.18, interface{} has an alias: any.
+        - name: use-any
+          disabled: false
+        # Exported identifiers and packages (doc.go) must be documented.
+        - name: exported
+        - name: package-comments
 
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment # too strict
-    settings:
-      shadow:
-        strict: true
-
-  nakedret:
-    # No naked returns, ever.
-    max-func-lines: 1
-
-  revive:
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      # Blank import should be only in a main or test package, or have a comment justifying it.
-      # Disabled to avoid swearing at import _ "github.com/mailru/easyjson/gen"
-      # needed to generate easyjson when using a vendor folder
-      - name: blank-imports
-        disabled: true
-      # Since GO 1.18, interface{} has an alias: any. This rule proposes to replace instances of interface{} with any.
-      - name: use-any
-        disabled: false
+      - path: _test\.go
+        linters:
+          - bodyclose
+          - dupl
+          - errcheck
+          - funlen
+          - goconst
+          - gosec
+          - noctx
 
 issues:
   max-issues-per-linter: 0
-
   max-same-issues: 0
 
-  exclude-rules:
-    - path: "_test\\.go"
-      linters:
-        - bodyclose
-        - dupl
-        - funlen
-        - goconst
-        - gosec
-        - noctx
-        - errcheck
+formatters:
+  enable:
+    - gofmt

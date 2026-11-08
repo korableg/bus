@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -14,21 +14,31 @@ import (
 	"github.com/korableg/bus/codec"
 )
 
-// Producer the kafka producer
+// Producer sends messages of type T to Kafka. It is safe for concurrent use.
 type Producer[T any] struct {
+	cli           sarama.Client
 	asyncProducer sarama.AsyncProducer
 	syncProducer  sarama.SyncProducer
 
 	logger *slog.Logger
 
-	isClosed     atomic.Bool
+	mu       sync.RWMutex
+	closed   bool
+	closing  chan struct{}
+	inflight sync.WaitGroup
+
+	done chan struct{}
+
+	errorHandler func(err error)
+
 	isIdempotent bool
 
 	encoder func(T) codec.Encoder[T]
 	traceID func(context.Context) string
 }
 
-// New constructs Producer
+// New connects to brokers and returns a Producer that encodes the messages with encoder,
+// e.g. wire.Encoder(). Close it to flush the queued messages and release the connections.
 func New[T any](encoder func(T) codec.Encoder[T], brokers []string, opts ...Option) (*Producer[T], error) {
 	if encoder == nil {
 		return nil, errors.New("encoder is not defined")
@@ -47,15 +57,26 @@ func New[T any](encoder func(T) codec.Encoder[T], brokers []string, opts ...Opti
 
 	asyncProducer, err := sarama.NewAsyncProducerFromClient(cli)
 	if err != nil {
-		return nil, fmt.Errorf("init async producer: %w", err)
+		return nil, errors.Join(fmt.Errorf("init async producer: %w", err), cli.Close())
 	}
 
 	syncProducer, err := sarama.NewSyncProducerFromClient(cli)
 	if err != nil {
-		return nil, fmt.Errorf("init sync producer: %w", err)
+		return nil, errors.Join(fmt.Errorf("init sync producer: %w", err), asyncProducer.Close(), cli.Close())
 	}
 
-	pbp := &Producer[T]{
+	return newProducer(cli, asyncProducer, syncProducer, encoder, o), nil
+}
+
+func newProducer[T any](
+	cli sarama.Client,
+	asyncProducer sarama.AsyncProducer,
+	syncProducer sarama.SyncProducer,
+	encoder func(T) codec.Encoder[T],
+	o Options,
+) *Producer[T] {
+	p := &Producer[T]{
+		cli:           cli,
 		asyncProducer: asyncProducer,
 		syncProducer:  syncProducer,
 
@@ -64,34 +85,53 @@ func New[T any](encoder func(T) codec.Encoder[T], brokers []string, opts ...Opti
 
 		logger:  o.Logger,
 		traceID: o.TraceID,
+
+		errorHandler: o.ErrorHandler,
+
+		closing: make(chan struct{}),
+		done:    make(chan struct{}),
 	}
 
-	go pbp.readEvents()
+	go p.readEvents()
 
-	return pbp, nil
+	return p
 }
 
-// Send sends the message asynchronously
+// Send queues the message for sending and returns without waiting for the broker.
+// A delivery error is logged and passed to the handler set by WithErrorHandler.
+// Send blocks while the queue is full; it returns ctx.Err() if ctx is done meanwhile
+// and ErrClosed if the producer is closed.
 func (p *Producer[T]) Send(ctx context.Context, msg T) error {
-	if p.isClosed.Load() {
-		return ErrClosed
+	if err := p.acquire(); err != nil {
+		return err
 	}
+	defer p.inflight.Done()
 
 	sMsg, err := p.producerMessage(ctx, msg)
 	if err != nil {
 		return err
 	}
 
-	p.asyncProducer.Input() <- sMsg
+	if err = ctx.Err(); err != nil {
+		return err
+	}
 
-	return nil
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.closing:
+		return ErrClosed
+	case p.asyncProducer.Input() <- sMsg:
+		return nil
+	}
 }
 
-// SendSync sends the message synchronously
+// SendSync sends the message and waits for the acknowledgment of all in-sync replicas.
 func (p *Producer[T]) SendSync(ctx context.Context, msg T) error {
-	if p.isClosed.Load() {
-		return ErrClosed
+	if err := p.acquire(); err != nil {
+		return err
 	}
+	defer p.inflight.Done()
 
 	sMsg, err := p.producerMessage(ctx, msg)
 	if err != nil {
@@ -106,22 +146,53 @@ func (p *Producer[T]) SendSync(ctx context.Context, msg T) error {
 	return nil
 }
 
-// Close closes Producer
+// Close waits for the Send and SendSync calls in progress, flushes the queued messages
+// and closes the connections. The delivery errors of the flushed messages reach the error handler
+// before Close returns. The next calls return ErrClosed.
 func (p *Producer[T]) Close() error {
-	if p.isClosed.Swap(true) {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
 		return ErrClosed
 	}
 
+	p.closed = true
+	close(p.closing)
+	p.mu.Unlock()
+
+	p.inflight.Wait()
+
+	p.asyncProducer.AsyncClose()
+	<-p.done
+
 	return errors.Join(
-		p.asyncProducer.Close(),
 		p.syncProducer.Close(),
+		p.cli.Close(),
 	)
 }
 
-func (p *Producer[T]) producerMessage(ctx context.Context, msg T) (*sarama.ProducerMessage, error) {
-	var (
-		enc = p.encoder(msg)
+func (p *Producer[T]) acquire() error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 
+	if p.closed {
+		return ErrClosed
+	}
+
+	p.inflight.Add(1)
+
+	return nil
+}
+
+func (p *Producer[T]) producerMessage(ctx context.Context, msg T) (*sarama.ProducerMessage, error) {
+	enc := p.encoder(msg)
+
+	payload, err := enc.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("marshal message: %w", err)
+	}
+
+	var (
 		topic   = enc.Topic()
 		key     = enc.Key()
 		evtType = enc.Type()
@@ -134,11 +205,6 @@ func (p *Producer[T]) producerMessage(ctx context.Context, msg T) (*sarama.Produ
 
 	if p.isIdempotent && len(key) == 0 {
 		return nil, ErrEmptyKey
-	}
-
-	payload, err := enc.Marshal()
-	if err != nil {
-		return nil, fmt.Errorf("marshal message: %w", err)
 	}
 
 	id, err := uuid.NewV7()
@@ -175,44 +241,78 @@ func (p *Producer[T]) producerMessage(ctx context.Context, msg T) (*sarama.Produ
 		Key:     sarama.ByteEncoder(key),
 		Value:   sarama.ByteEncoder(payload),
 		Headers: msgHdrs,
-		Metadata: metric{
-			topic:     topic,
-			eventType: evtType,
-			timestamp: ts,
+		Metadata: msgMeta{
+			metric: metric{
+				topic:     topic,
+				eventType: evtType,
+				timestamp: ts,
+			},
+			id:  id.String(),
+			key: key,
+			msg: msg,
 		},
 		Timestamp: ts,
 	}, nil
 }
 
-func (p *Producer[T]) readEvents() {
-	var (
-		m  metric
-		ok bool
+type msgMeta struct {
+	metric
 
-		success *sarama.ProducerMessage
-		err     *sarama.ProducerError
+	id  string
+	key []byte
+	msg any
+}
+
+func (p *Producer[T]) handleError(perr *sarama.ProducerError) {
+	p.logger.Error("send kafka message error", "err", perr.Err)
+
+	sendErr := &SendError{Err: perr.Err}
+
+	if perr.Msg != nil {
+		sendErr.Topic = perr.Msg.Topic
+
+		if m, ok := perr.Msg.Metadata.(msgMeta); ok {
+			observeSend(m.metric, perr.Err)
+
+			sendErr.Topic = m.topic
+			sendErr.Key = m.key
+			sendErr.ID = m.id
+			sendErr.Type = m.eventType
+			sendErr.Msg = m.msg
+		}
+	}
+
+	if p.errorHandler != nil {
+		p.errorHandler(sendErr)
+	}
+}
+
+func (p *Producer[T]) readEvents() {
+	defer close(p.done)
+
+	var (
+		successes = p.asyncProducer.Successes()
+		errs      = p.asyncProducer.Errors()
 	)
 
-	for {
+	for successes != nil || errs != nil {
 		select {
-		case success, ok = <-p.asyncProducer.Successes():
+		case success, ok := <-successes:
 			if !ok {
-				return
+				successes = nil
+				continue
 			}
 
-			if m, ok = success.Metadata.(metric); ok {
-				observeSend(m, nil)
+			if m, isMeta := success.Metadata.(msgMeta); isMeta {
+				observeSend(m.metric, nil)
 			}
-		case err, ok = <-p.asyncProducer.Errors():
+		case err, ok := <-errs:
 			if !ok {
-				return
+				errs = nil
+				continue
 			}
 
-			p.logger.Error("send kafka message error", "err", err.Err)
-
-			if m, ok = err.Msg.Metadata.(metric); ok {
-				observeSend(m, err.Err)
-			}
+			p.handleError(err)
 		}
 	}
 }

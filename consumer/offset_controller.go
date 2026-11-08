@@ -40,11 +40,13 @@ func (o *offsetController) Inc() {
 	}
 }
 
+// Mark marks the offsets the handlers have processed. Marking an offset which is not above the current one
+// is a no-op in sarama, and Commit sends nothing if no offset has changed.
 func (o *offsetController) Mark(sess sarama.ConsumerGroupSession) (marked bool) {
 	for topic, parts := range sess.Claims() {
 		for part, off := range o.hCtl.Offset(topic, parts...) {
 			sess.MarkOffset(topic, part, off+1, "ok")
-			incCommitted(topic, part)
+			setCommitted(topic, part, off+1)
 			o.logger.Debug("mark offset", "topic", topic, "partition", part, "offset", off)
 			marked = true
 		}

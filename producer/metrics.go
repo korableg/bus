@@ -5,6 +5,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+
+	"github.com/korableg/bus/internal/metrics"
 )
 
 type metric struct {
@@ -29,13 +31,6 @@ func observeSend(m metric, err error) {
 	sendHistogram.With(prometheus.Labels{
 		labelTopic:     m.topic,
 		labelEventType: m.eventType,
-		labelError:     errToLabel(err),
+		labelError:     metrics.ErrToLabel(err),
 	}).Observe(time.Since(m.timestamp).Seconds())
-}
-
-func errToLabel(err error) string {
-	if err == nil {
-		return "false"
-	}
-	return "true"
 }

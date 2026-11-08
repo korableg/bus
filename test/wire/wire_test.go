@@ -372,11 +372,11 @@ func TestIntegration_Consumer_ContextCanceled(t *testing.T) {
 	assert.NoError(t, p.Close())
 }
 
-func cleanUp(t *testing.T) {
-	t.Helper()
+func cleanUp(tb testing.TB) {
+	tb.Helper()
 
 	admCli, err := sarama.NewClusterAdmin(bootstrap, sarama.NewConfig())
-	require.NoError(t, err)
+	require.NoError(tb, err)
 
 	defer admCli.Close()
 
@@ -385,10 +385,10 @@ func cleanUp(t *testing.T) {
 		1: -1,
 		2: -1,
 	})
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 
 	err = admCli.DeleteRecords("test_topic_2", map[int32]int64{
 		0: -1,
 	})
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 }
