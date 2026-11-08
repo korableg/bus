@@ -24,6 +24,7 @@ import (
 	wireCodec "github.com/korableg/bus/codec/proto/wire"
 	"github.com/korableg/bus/consumer"
 	"github.com/korableg/bus/producer"
+	"github.com/korableg/bus/protobus"
 	"github.com/korableg/bus/test"
 )
 
@@ -174,7 +175,7 @@ func testRunConsumer(t *testing.T, brokers []string) error { //nolint: thelper
 		return err
 	}
 
-	err = cons.AddHandler(consumer.NewHandler(wireCodec.Decoder[*test.TestEvent3](),
+	err = cons.AddHandler(protobus.NewHandler(
 		func(ctx context.Context, msg *test.TestEvent3, _ consumer.Message) error {
 			tid := ctx.Value(ctxKey{})
 			assert.Equal(t, tid.(string), traceID)

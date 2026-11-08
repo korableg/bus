@@ -19,6 +19,9 @@
 //
 //	err = g.Run(ctx)
 //
+// With the wire codec, protobus.NewHandler and protobus.NewHandlerBatch infer the decoder
+// from the type of the handler function.
+//
 // # Delivery semantics
 //
 // Errors and panics of a handler are retried indefinitely by default (RetryMaxTime is zero),

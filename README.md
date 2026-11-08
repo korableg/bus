@@ -91,6 +91,22 @@ if err != nil {
 }
 ```
 
+With the wire codec the decoder may be omitted: [protobus](./protobus/) infers the event type from the handler function.
+
+```go
+err = c.AddHandler(protobus.NewHandler(
+    func(ctx context.Context, msg *events.YourEvent, raw consumer.Message) error {
+        // handle your message
+        return nil
+    }))
+
+err = c.AddHandler(protobus.NewHandlerBatch(
+    func(ctx context.Context, msgs []*events.YourEvent, raws []consumer.Message) error {
+        // handle your messages
+        return nil
+    }))
+```
+
 The batch handler keeps one buffer for all the partitions of the topic, so a batch may contain the messages of several partitions.
 The calls of the batch function are sequential.
 A batch is flushed when it reaches the batch size or when no message has arrived for the flush timeout: while the messages keep coming the batch waits for its size, and the timeout keeps them from getting stale when the flow slows down.
