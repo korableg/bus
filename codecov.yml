@@ -1,0 +1,4 @@
+# Keep in sync with the exclusions in .testcoverage.yml.
+ignore:
+  - "test"
+  - "**/*.pb.go"
