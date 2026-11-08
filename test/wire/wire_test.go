@@ -24,6 +24,7 @@ import (
 	wireCodec "github.com/korableg/bus/codec/proto/wire"
 	"github.com/korableg/bus/consumer"
 	"github.com/korableg/bus/producer"
+	"github.com/korableg/bus/protobus"
 	"github.com/korableg/bus/test"
 )
 
@@ -174,7 +175,7 @@ func testRunConsumer(t *testing.T, brokers []string) error { //nolint: thelper
 		return err
 	}
 
-	err = cons.AddHandler(consumer.NewHandler(wireCodec.Decoder[*test.TestEvent3](),
+	err = cons.AddHandler(protobus.NewHandler(
 		func(ctx context.Context, msg *test.TestEvent3, _ consumer.Message) error {
 			tid := ctx.Value(ctxKey{})
 			assert.Equal(t, tid.(string), traceID)
@@ -372,11 +373,11 @@ func TestIntegration_Consumer_ContextCanceled(t *testing.T) {
 	assert.NoError(t, p.Close())
 }
 
-func cleanUp(t *testing.T) {
-	t.Helper()
+func cleanUp(tb testing.TB) {
+	tb.Helper()
 
 	admCli, err := sarama.NewClusterAdmin(bootstrap, sarama.NewConfig())
-	require.NoError(t, err)
+	require.NoError(tb, err)
 
 	defer admCli.Close()
 
@@ -385,10 +386,10 @@ func cleanUp(t *testing.T) {
 		1: -1,
 		2: -1,
 	})
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 
 	err = admCli.DeleteRecords("test_topic_2", map[int32]int64{
 		0: -1,
 	})
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 }

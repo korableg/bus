@@ -52,6 +52,9 @@ func (d *decoder[T]) Unmarshal(data []byte, headers []codec.Header) (msg T, err 
 	return msg, nil
 }
 
+// Decoder returns the decoder of the messages of type T to pass to consumer.NewHandler
+// or consumer.NewHandlerBatch, e.g. Decoder[*events.OrderCreated](). It returns codec.ErrWrongType
+// for a message whose "type" header is another message.
 func Decoder[T proto.Message]() codec.Decoder[T] {
 	var zero T
 	return &decoder[T]{

@@ -3,25 +3,23 @@ package consumer
 import (
 	"errors"
 
-	"github.com/cenkalti/backoff/v4"
+	"github.com/cenkalti/backoff/v7"
 )
 
 var (
-	// ErrNoTopics consumer doesn't have topics and can't start
+	// ErrNoTopics is returned by Group.Run if no handler has been added.
 	ErrNoTopics = errors.New("no topics to consume")
-	// ErrEmptyTopic the message wrapped by the handler has no topic (not event)
+	// ErrEmptyTopic is returned by Group.AddHandler for a handler without a topic.
 	ErrEmptyTopic = errors.New("empty topic")
-	// ErrClosed consumer was closed
+	// ErrClosed is returned by the calls of a closed group.
 	ErrClosed = errors.New("closed")
-	// ErrRunned consumer is runned
+	// ErrRunned is returned by Group.AddHandler after Group.Run has started.
 	ErrRunned = errors.New("runned")
-
-	// ErrMessageUnmarshal the error happens when message tried to unmarshal
-	ErrMessageUnmarshal = errors.New("message unmarshal error")
-	// ErrMessageHandle the error happens when message tried to handle
-	ErrMessageHandle = errors.New("message handle error")
 )
 
+// PermanentError marks err as permanent: a handler function returning it is not retried,
+// the message is considered handled and its offset is committed. Use it for the messages
+// a retry can't fix, e.g. invalid ones.
 func PermanentError(err error) error {
 	return backoff.Permanent(err)
 }
