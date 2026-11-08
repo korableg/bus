@@ -1,7 +1,6 @@
 # BUS: The Kafka event bus framework
 
-![coverage](https://raw.githubusercontent.com/korableg/bus/badges/.badges/main/coverage.svg)
-[![Go Report Card](https://goreportcard.com/badge/github.com/korableg/bus)](https://goreportcard.com/report/github.com/korableg/bus)
+[![codecov](https://codecov.io/gh/korableg/bus/graph/badge.svg)](https://app.codecov.io/gh/korableg/bus)
 [![Go Reference](https://pkg.go.dev/badge/github.com/korableg/bus.svg)](https://pkg.go.dev/github.com/korableg/bus)
 
 <p align="center">
