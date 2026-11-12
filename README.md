@@ -1,5 +1,6 @@
 # BUS: The Kafka event bus framework
 
+[![Mentioned in Awesome Go](https://awesome.re/mentioned-badge.svg)](https://github.com/avelino/awesome-go)
 [![codecov](https://codecov.io/gh/korableg/bus/graph/badge.svg)](https://app.codecov.io/gh/korableg/bus)
 [![Go Reference](https://pkg.go.dev/badge/github.com/korableg/bus.svg)](https://pkg.go.dev/github.com/korableg/bus)
 
